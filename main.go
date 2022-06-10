@@ -10,8 +10,9 @@ import (
 
 func main() {
 	router := gin.Default()
-	router.GET("/product_list", database.SearchAll)  //搜尋所有產品
-	router.GET("/product", database.SearchProduct)   //Query Search 搜尋單一商品-> product?name=
+	router.GET("/product_list", database.SearchAll) //搜尋所有產品
+	router.GET("/product", database.SearchProduct)  //Query Search 搜尋單一商品-> product?name=
+	router.GET("/product_name", database.SearchProductName)
 	router.POST("/create", database.InsertProduct)   //新增商品
 	router.POST("/modify", database.ModifyProduct)   // 修改商品資訊
 	router.POST("/buy", database.Buy)                //購買商品

@@ -1,7 +1,6 @@
 package database
 
 import (
-	"database/sql"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -10,21 +9,101 @@ import (
 
 	"github.com/gin-gonic/gin"
 	_ "github.com/go-sql-driver/mysql"
+	"gorm.io/driver/mysql"
+	"gorm.io/gorm"
 )
 
 const (
-	host     = "127.0.0.1"
-	database = "vending"
-	user     = "search"
-	password = "123456"
-	root     = "root"
-	root_pwd = "s850429s"
+	UserName   string = "root"
+	Password   string = "s850429s"
+	Addr       string = "127.0.0.1"
+	Port       int    = 3306
+	searchPort int    = 3307
+	Database   string = "vending"
+	root       string = "root"
+	root_pwd   string = "s850429s"
 )
 
-func SearchProduct(c *gin.Context) {
+type Product struct {
+	ID          int64  `json:"id"`
+	Name        string `json:"name"`
+	Price       string `json:"price"`
+	Inventory   string `json:"inventory"`
+	Status      int64  `json:"status"`
+	Update_time time.Time
+}
 
-	var connectionString = fmt.Sprintf("%s:%s@tcp(%s:3307)/%s?allowNativePasswords=true", user, password, host, database)
-	db, err := sql.Open("mysql", connectionString)
+var product Product
+var products []Product
+
+type Sale struct {
+	ID          int64     `json:"id"`
+	Customer    string    `json:"customer"`
+	Production  string    `json:"production"`
+	Price       string    `json:"price"`
+	Update_time time.Time `json:"update_time"`
+	Comment     string    `json:"comment"`
+}
+
+var sale_info Sale
+
+func (Product) TableName() string {
+	return "product_info"
+}
+
+func (Sale) TableName() string {
+	return "sale_info"
+}
+
+func stringToInt(s string) int {
+	if result, err := strconv.Atoi(s); err == nil {
+		return result
+	}
+	return 0
+}
+
+func SearchProduct(c *gin.Context) {
+	addr := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8&parseTime=True", root, root_pwd, Addr, searchPort, Database)
+	conn, err := gorm.Open(mysql.Open(addr), &gorm.Config{})
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"message": "connect MySQL failed",
+			"status":  err,
+		})
+		return
+	}
+
+	id := c.DefaultQuery("id", "")
+	if id == "" {
+		c.IndentedJSON(http.StatusOK, gin.H{
+			"err_message":  "網址後方沒有輸入商品ID",
+			"correct_link": "http://localhost/product?id={product_id}",
+		})
+		return
+	}
+	if err2 := conn.Where("id=?", id).Find(&product).Error; err2 != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"err_message": err2,
+		})
+		return
+	}
+	if product.Name == "" { // product.Name is empty means no data
+		c.JSON(http.StatusOK, gin.H{
+			"err_message": "查詢商品不存在",
+		})
+		return
+	} else {
+		c.JSON(http.StatusOK, gin.H{
+			"product_name":      product.Name,
+			"product_price":     product.Price,
+			"product_inventory": product.Inventory,
+		})
+	}
+}
+
+func SearchProductName(c *gin.Context) {
+	addr := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8&parseTime=True", root, root_pwd, Addr, searchPort, Database)
+	conn, err := gorm.Open(mysql.Open(addr), &gorm.Config{})
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"message": "connect MySQL failed",
@@ -41,74 +120,60 @@ func SearchProduct(c *gin.Context) {
 		})
 		return
 	}
-	var price, inventory int
-	var product string
-	current_product := SearchAll1()
-	err = db.QueryRow("select name,price,inventory FROM product_info where name=?", name).Scan(&product, &price, &inventory)
-	if err != nil {
+	if err2 := conn.Where("name=?", name).Find(&product).Error; err2 != nil {
 		c.JSON(http.StatusOK, gin.H{
-			"err_message":     "查詢的商品不存在",
-			"current_product": current_product,
+			"err_message": err2,
 		})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{
-		"product_name":      name,
-		"product_price":     price,
-		"product_inventory": inventory,
-	})
-
+	if product.Name == "" { // product.Name is empty means no data
+		c.JSON(http.StatusOK, gin.H{
+			"err_message": "查詢商品不存在",
+		})
+		return
+	} else {
+		c.JSON(http.StatusOK, gin.H{
+			"product_id":        product.ID,
+			"product_name":      product.Name,
+			"product_price":     product.Price,
+			"product_inventory": product.Inventory,
+		})
+	}
 }
 
 func SearchAll(c *gin.Context) {
-	var connectionString = fmt.Sprintf("%s:%s@tcp(%s:3307)/%s?allowNativePasswords=true", user, password, host, database)
-	db, err := sql.Open("mysql", connectionString)
+	addr := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8&parseTime=True", root, root_pwd, Addr, searchPort, Database)
+	conn, err := gorm.Open(mysql.Open(addr), &gorm.Config{})
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
-			"err_message": "connect MySQL failed",
-			"status":      err,
+			"message": "connect MySQL failed",
+			"status":  err,
 		})
 		return
 	}
-	rows, err := db.Query("select * from product_info")
-	defer rows.Close()
-	if err != nil {
-		c.JSON(http.StatusOK, gin.H{
-			"err_message": err,
-		})
-		return
-	}
-	for rows.Next() {
-		var uid int
-		var name string
-		var price int
-		var inventory int
-		var status int
-		var update_time []uint8
 
-		err = rows.Scan(&uid, &name, &price, &inventory, &status, &update_time)
-		checkErr(err)
+	conn.Find(&products)
+	for _, p := range products {
 		c.IndentedJSON(http.StatusOK, gin.H{
-			"product_name":      name,
-			"product_price":     price,
-			"product_inventory": inventory,
+			"product_name":      p.Name,
+			"product_price":     p.Price,
+			"product_inventory": p.Inventory,
 		})
 	}
-
 }
 
 func InsertProduct(c *gin.Context) {
-	var connectionString = fmt.Sprintf("%s:%s@tcp(%s:3306)/%s?allowNativePasswords=true", root, root_pwd, host, database)
-	db, err := sql.Open("mysql", connectionString)
+	addr := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8&parseTime=True", UserName, Password, Addr, Port, Database)
+	conn, err := gorm.Open(mysql.Open(addr), &gorm.Config{})
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
-			"err_message": "connect MySQL failed",
-			"status":      err,
+			"message": "connect MySQL failed",
+			"status":  err,
 		})
 		return
 	}
-	defer db.Close()
-	var status int
+	var status int64
+
 	name := c.DefaultPostForm("name", " ")
 	if name == "" {
 		c.JSON(http.StatusOK, gin.H{
@@ -116,8 +181,15 @@ func InsertProduct(c *gin.Context) {
 		})
 		return
 	}
-	err = db.QueryRow("select name from product_info where name = ?", name).Scan(&name)
-	if err != nil {
+
+	if errSearch := conn.Where("name=?", name).Find(&product).Error; errSearch != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"err_message": errSearch,
+		})
+		return
+	}
+
+	if product.ID == 0 { //0代表商品不存在 ，可以新增
 		price := c.DefaultPostForm("price", "0")
 		if stringToInt(price) < 0 {
 			c.IndentedJSON(http.StatusOK, gin.H{
@@ -127,6 +199,11 @@ func InsertProduct(c *gin.Context) {
 		} else if strings.Contains(price, ".") {
 			c.IndentedJSON(http.StatusOK, gin.H{
 				"err_message": "金額不能為小數",
+			})
+			return
+		} else if price == "" {
+			c.IndentedJSON(http.StatusOK, gin.H{
+				"err_message": "金額不能為空",
 			})
 			return
 		}
@@ -141,6 +218,11 @@ func InsertProduct(c *gin.Context) {
 				"err_message": "庫存數量不能為小數",
 			})
 			return
+		} else if inventory == "" {
+			c.IndentedJSON(http.StatusOK, gin.H{
+				"err_message": "庫存不能為空",
+			})
+			return
 		}
 
 		if inventory == "0" {
@@ -148,14 +230,21 @@ func InsertProduct(c *gin.Context) {
 		} else {
 			status = 0
 		}
-		_, err1 := db.Exec("insert into product_info(name,price,inventory,status,update_time) values(?,?,?,?,now())", name, price, inventory, status)
-		checkErr(err1)
-		c.JSON(http.StatusOK, gin.H{
-			"message":           "新增成功",
-			"product_name":      name,
-			"product_price":     price,
-			"product_inventory": inventory,
-		})
+		new_product := &Product{Name: name, Price: price, Inventory: inventory, Status: status, Update_time: time.Now()}
+		if errCreate := conn.Debug().Create(&new_product).Error; errCreate == nil {
+			c.JSON(http.StatusOK, gin.H{
+				"message":           "新增成功",
+				"product_name":      name,
+				"product_price":     price,
+				"product_inventory": inventory,
+			})
+		} else {
+			c.JSON(http.StatusOK, gin.H{
+				"err_message": errCreate,
+			})
+			return
+		}
+
 	} else {
 		c.JSON(http.StatusOK, gin.H{
 			"err_message": "你輸入的商品已經存在！請重新輸入",
@@ -165,17 +254,16 @@ func InsertProduct(c *gin.Context) {
 }
 
 func ModifyProduct(c *gin.Context) {
-	var connectionString = fmt.Sprintf("%s:%s@tcp(%s:3306)/%s?allowNativePasswords=true", root, root_pwd, host, database)
-	db, err := sql.Open("mysql", connectionString)
+	addr := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8&parseTime=True", UserName, Password, Addr, Port, Database)
+	conn, err := gorm.Open(mysql.Open(addr), &gorm.Config{})
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
-			"err_message": "connect MySQL failed",
-			"status":      err,
+			"message": "connect MySQL failed",
+			"status":  err,
 		})
 		return
 	}
-	defer db.Close()
-	var status int
+	var status int64
 	id := c.DefaultPostForm("id", " ")
 	if id == "" {
 		c.JSON(http.StatusOK, gin.H{
@@ -184,12 +272,16 @@ func ModifyProduct(c *gin.Context) {
 		return
 	}
 
-	current_productID := searchID()
-	err = db.QueryRow("select id from product_info where id = ?", id).Scan(&id)
-	if err != nil {
+	if errSearch := conn.Where("id=?", id).Find(&product).Error; errSearch != nil {
 		c.JSON(http.StatusOK, gin.H{
-			"err_message":       "輸入的ID不存在，請重新確認",
-			"current_productID": current_productID,
+			"err_message": errSearch,
+		})
+		return
+	}
+
+	if product.ID == 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"err_message": "輸入的ID不存在，請重新確認",
 		})
 		return
 	}
@@ -200,6 +292,7 @@ func ModifyProduct(c *gin.Context) {
 		})
 		return
 	}
+
 	new_price := c.DefaultPostForm("new_price", "0")
 	if stringToInt(new_price) < 0 {
 		c.IndentedJSON(http.StatusOK, gin.H{
@@ -211,7 +304,13 @@ func ModifyProduct(c *gin.Context) {
 			"err_message": "金額不能為小數",
 		})
 		return
+	} else if new_price == "" {
+		c.IndentedJSON(http.StatusOK, gin.H{
+			"err_message": "庫存不能為空",
+		})
+		return
 	}
+
 	new_inventory := c.DefaultPostForm("new_inventory", "0")
 	if stringToInt(new_inventory) < 0 {
 		c.IndentedJSON(http.StatusOK, gin.H{
@@ -223,6 +322,11 @@ func ModifyProduct(c *gin.Context) {
 			"err_message": "庫存數量不能為小數",
 		})
 		return
+	} else if new_inventory == "" {
+		c.IndentedJSON(http.StatusOK, gin.H{
+			"err_message": "庫存不能為空",
+		})
+		return
 	}
 
 	if new_inventory == "0" {
@@ -230,21 +334,26 @@ func ModifyProduct(c *gin.Context) {
 	} else {
 		status = 0
 	}
-	_, err1 := db.Exec("update product_info set name=?,price=?,inventory=?,status=? where id=?", new_name, new_price, new_inventory, status, id)
-	checkErr(err1)
-	c.JSON(http.StatusOK, gin.H{
-		"message":           "修改成功",
-		"product_name":      new_name,
-		"product_price":     new_price,
-		"product_inventory": new_inventory,
-	})
 
+	Modify := Product{Name: new_name, Price: new_price, Inventory: new_inventory, Status: status, Update_time: time.Now()}
+	if errModify := conn.Debug().Model(&Product{}).Where("id = ?", id).Updates(Modify).Error; errModify == nil {
+		c.JSON(http.StatusOK, gin.H{
+			"message":           "修改成功",
+			"product_name":      new_name,
+			"product_price":     new_price,
+			"product_inventory": new_inventory,
+		})
+	} else {
+		c.JSON(http.StatusOK, gin.H{
+			"err_message": errModify,
+		})
+		return
+	}
 }
 
 func Buy(c *gin.Context) {
-	var inventory, price, status int
-	var connectionString = fmt.Sprintf("%s:%s@tcp(%s:3306)/%s?allowNativePasswords=true", root, root_pwd, host, database)
-	db, err := sql.Open("mysql", connectionString)
+	addr := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8&parseTime=True", UserName, Password, Addr, Port, Database)
+	conn, err := gorm.Open(mysql.Open(addr), &gorm.Config{})
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"message": "connect MySQL failed",
@@ -252,9 +361,7 @@ func Buy(c *gin.Context) {
 		})
 		return
 	}
-	defer db.Close()
 
-	now_sale_product := searchOnSale()
 	buy := c.DefaultPostForm("name", " ")
 	if buy == "" {
 		c.IndentedJSON(http.StatusOK, gin.H{
@@ -263,21 +370,17 @@ func Buy(c *gin.Context) {
 		})
 		return
 	}
-	current_product := SearchAll1()
-	err = db.QueryRow("select inventory,price,status from product_info where name = ?", buy).Scan(&inventory, &price, &status)
-	if err != nil {
+	conn.Where("name=?", buy).Find(&product)
+	if product.ID == 0 {
 		c.IndentedJSON(http.StatusOK, gin.H{
-			"code":            "-2",
-			"err_message":     "輸入的商品不存在，請點連結重新確認所有商品名稱",
-			"current_product": current_product,
+			"code":        "-2",
+			"err_message": "輸入的商品不存在，請點連結重新確認所有商品名稱",
 		})
 		return
-	}
-	if status == 1 {
+	} else if product.Inventory == "0" {
 		c.IndentedJSON(http.StatusOK, gin.H{
 			"code":        "-3",
-			"err_message": "輸入的商品庫存為0，請看下方目前可販售商品",
-			"now_on_sale": now_sale_product,
+			"err_message": "商品庫存為0,無法購買",
 		})
 		return
 	}
@@ -290,59 +393,75 @@ func Buy(c *gin.Context) {
 		return
 	}
 	//新增訂單資訊
-	_, err2 := db.Exec("insert into sale_info(customer,production,price,update_time) values(?,?,?,now())", customer, buy, price)
-	checkErr(err2)
+
+	sale_info := &Sale{Customer: customer, Production: buy, Price: product.Price, Update_time: time.Now()}
+	conn.Create(&sale_info)
 
 	//修改商品表庫存
-	if inventory == 1 {
+	var status int64
+	if stringToInt(product.Inventory)-1 == 0 {
 		status = 1
 	} else {
 		status = 0
 	}
-	_, err1 := db.Exec("update product_info set inventory=?,status=? where name=?", inventory-1, status, buy)
-	checkErr(err1)
-	c.IndentedJSON(http.StatusOK, gin.H{
-		"code":          "0",
-		"message":       "購買成功",
-		"product_name":  buy,
-		"product_price": price,
-	})
-
+	if errbuy := conn.Debug().Model(&Product{}).Where("name = ?", buy).Updates(Product{Inventory: fmt.Sprint(stringToInt(product.Inventory) - 1), Status: status}).Error; errbuy == nil {
+		c.IndentedJSON(http.StatusOK, gin.H{
+			"code":          "0",
+			"message":       "購買成功",
+			"product_name":  buy,
+			"product_price": product.Price,
+		})
+	} else {
+		c.IndentedJSON(http.StatusOK, gin.H{
+			"err_message": errbuy,
+		})
+	}
 }
+
 func Performance(c *gin.Context) {
-	var connectionString = fmt.Sprintf("%s:%s@tcp(%s:3306)/%s?allowNativePasswords=true", root, root_pwd, host, database)
-	db, err := sql.Open("mysql", connectionString)
+	addr := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8&parseTime=True", UserName, Password, Addr, Port, Database)
+	conn, err := gorm.Open(mysql.Open(addr), &gorm.Config{})
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
-			"err_message": "connect MySQL failed",
-			"status":      err,
+			"message": "connect MySQL failed",
+			"status":  err,
 		})
 		return
 	}
-	defer db.Close()
-	timestring := time.Now().Format("2006-01-02")
-	date := c.DefaultQuery("date", timestring)
-	if len(date) != 10 {
-		c.JSON(http.StatusOK, gin.H{
-			"err_message":    "日期格式錯誤",
-			"correct_format": "YYYY-MM-DD",
-		})
-		return
-	}
-	today_sale := "select production,count(*),SUM(price) from sale_info where update_time BETWEEN '" + date + " 00:00:59' AND '" + date + " 23:59:59' GROUP BY production;"
+
+	timestring := time.Now().Format("2006-01-02 15:04:05")
+	startdate := c.DefaultQuery("startdate", timestring)
+	enddate := c.DefaultQuery("enddate", timestring)
+	// if len(date) != 10 {
+	// 	c.JSON(http.StatusOK, gin.H{
+	// 		"err_message":    "日期格式錯誤",
+	// 		"correct_format": "YYYY-MM-DD",
+	// 	})
+	// 	return
+	// }
+
+	rows, err := conn.Debug().Table("sale_info").Select("production,count(*) as number ,SUM(price) as money").Where("update_time between ?  and ? ", startdate, enddate).Group("production").Rows()
+	//today_sale := "select production,count(*),SUM(price) from sale_info where update_time BETWEEN '" + date + " 00:00:59' AND '" + date + " 23:59:59' GROUP BY production;"
 	//today_sale := "select production,count(*),SUM(price) from sale_info GROUP BY production;"
-	rows, err := db.Query(today_sale)
-	checkErr(err)
-	var total_price int
-	mapInstances := make(map[string]int)
+	if err != nil {
+		c.IndentedJSON(http.StatusOK, gin.H{
+			"err_message": err,
+		})
+		return
+	}
+	defer rows.Close()
+	mapInstances := make(map[string]int64)
+	var total_price int64
 	for rows.Next() {
 		var production string
-		var sale_count int
-		var price int
-		err = rows.Scan(&production, &sale_count, &price)
-		checkErr(err)
-		mapInstances[production] = sale_count
-		total_price += price
+		var price int64
+		var money int64
+		err = rows.Scan(&production, &price, &money)
+		if err != nil {
+			return
+		}
+		mapInstances[production] = price
+		total_price += money
 	}
 	if total_price == 0 {
 		c.IndentedJSON(http.StatusOK, gin.H{
@@ -350,148 +469,10 @@ func Performance(c *gin.Context) {
 		})
 		return
 	}
+
 	c.IndentedJSON(http.StatusOK, gin.H{
 		"product_info": mapInstances,
 		"total_price":  total_price,
 	})
 
-}
-
-//下方為api內用的func
-func checkErr(err error) {
-	if err != nil {
-		panic(err)
-		return
-	}
-}
-func buy2(customer string) {
-
-	var buy string
-	var inventory, price, status int
-	now_sale_product := searchOnSale()
-	fmt.Println("目前有販售的商品有:", now_sale_product)
-	fmt.Println("請輸入要購買的品項: ")
-	fmt.Scanln(&buy)
-
-	var connectionString = fmt.Sprintf("%s:%s@tcp(%s:3306)/%s?allowNativePasswords=true", root, root_pwd, host, database)
-	db, err := sql.Open("mysql", connectionString)
-	if err != nil {
-		fmt.Println("connect MySQL failed", err)
-		return
-	}
-	defer db.Close()
-	err = db.QueryRow("select inventory,price,status from product_info where name = ?", buy).Scan(&inventory, &price, &status)
-	if err != nil {
-		fmt.Println("您要購買的品項不存在，請重新輸入", err)
-		return
-	}
-
-	//新增訂單資訊
-	_, err2 := db.Exec("insert into sale_info(customer,production,price,update_time) values(?,?,?,now())", customer, buy, price)
-	checkErr(err2)
-
-	//修改商品表庫存
-	if inventory == 1 {
-		status = 1
-	} else {
-		status = 0
-	}
-
-	_, err1 := db.Exec("update product_info set inventory=?,status=? where name=?", inventory-1, status, buy)
-	checkErr(err1)
-
-	fmt.Println("購買成功")
-
-}
-func searchOnSale() []string {
-	var connectionString = fmt.Sprintf("%s:%s@tcp(%s:3307)/%s?allowNativePasswords=true", user, password, host, database)
-	db, err := sql.Open("mysql", connectionString)
-	if err != nil {
-		fmt.Println("connect MySQL failed", err)
-		return nil
-	}
-	var product []string
-	rows, err := db.Query("select * from product_info")
-	defer db.Close()
-	for rows.Next() {
-		var uid int
-		var name string
-		var price int
-		var inventory int
-		var status int
-		var update_time []uint8
-
-		err = rows.Scan(&uid, &name, &price, &inventory, &status, &update_time)
-		checkErr(err)
-
-		if status == 0 { //status =1為下架
-			product = append(product, name)
-		}
-	}
-	return product
-}
-
-func SearchAll1() []string {
-	var connectionString = fmt.Sprintf("%s:%s@tcp(%s:3307)/%s?allowNativePasswords=true", user, password, host, database)
-	db, err := sql.Open("mysql", connectionString)
-	if err != nil {
-		fmt.Println("connect MySQL failed", err)
-		return nil
-	}
-	rows, err := db.Query("select * from product_info")
-	defer rows.Close()
-	if err != nil {
-		fmt.Println(err)
-		return nil
-	}
-	var product []string
-	for rows.Next() {
-		var uid int
-		var name string
-		var price int
-		var inventory int
-		var status int
-		var update_time []uint8
-
-		err = rows.Scan(&uid, &name, &price, &inventory, &status, &update_time)
-		checkErr(err)
-		product = append(product, name)
-
-	}
-	return product
-}
-func searchID() []int {
-	var connectionString = fmt.Sprintf("%s:%s@tcp(%s:3307)/%s?allowNativePasswords=true", user, password, host, database)
-	db, err := sql.Open("mysql", connectionString)
-	if err != nil {
-		fmt.Println("connect MySQL failed", err)
-		return nil
-	}
-	rows, err := db.Query("select * from product_info")
-	defer rows.Close()
-	if err != nil {
-		fmt.Println(err)
-		return nil
-	}
-	var product []int
-	for rows.Next() {
-		var uid int
-		var name string
-		var price int
-		var inventory int
-		var status int
-		var update_time []uint8
-
-		err = rows.Scan(&uid, &name, &price, &inventory, &status, &update_time)
-		checkErr(err)
-		product = append(product, uid)
-
-	}
-	return product
-}
-func stringToInt(s string) int {
-	if result, err := strconv.Atoi(s); err == nil {
-		return result
-	}
-	return 0
 }
